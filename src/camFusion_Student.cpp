@@ -127,34 +127,39 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev,
                               std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches) {
 
-    double mean_distance = 0.0;
-    vector<cv::DMatch> inside_matches;
-    for (auto match: kptMatches) {
-        cv::KeyPoint currPoints = kptsCurr[match.trainIdx];
-        if (boundingBox.roi.contains(currPoints.pt)) {
-            inside_matches.push_back(match);
-        }
-    }
-//If the Dmatch distance between the descriptors is less, then their similarity is high.
-// If the Dmatch distance between the descriptors is more, then their similarity is low.
-// Using mean of Dmatch distance of all matches as threshold to filter matches which have low similarity.
-    for (auto inside_match:inside_matches) {
-        mean_distance += inside_match.distance;
-    }
-    if (inside_matches.size() > 0) {
-        mean_distance = mean_distance / inside_matches.size();
-    } else {
-        return;
-    }
-    //
-    for (auto inside_match:inside_matches) {
-        if (inside_match.distance < mean_distance) {
-            boundingBox.kptMatches.push_back(inside_match);
+    std::vector<double> distanceMap;
+
+    for(auto it = kptMatches.begin(); it != kptMatches.end(); it++)
+    {
+        int currKptIndex = (*it).trainIdx;
+        const auto & currKeyPoint = kptsCurr[currKptIndex];
+
+        if(boundingBox.roi.contains(currKeyPoint.pt))
+        {
+            int prevKptIndex = (*it).queryIdx;
+            const auto & prevKeyPoint = kptsPrev[prevKptIndex];
+
+            distanceMap.push_back(cv::norm(currKeyPoint.pt - prevKeyPoint.pt));
         }
     }
 
+    double distanceMapMean = std::accumulate(distanceMap.begin(), distanceMap.end(), 0.0) / distanceMap.size();
+    for(auto it = kptMatches.begin(); it != kptMatches.end(); it++)
+    {
+        int currKptIndex = (*it).trainIdx;
+        const auto & currKeyPoint = kptsCurr[currKptIndex];
+        if(boundingBox.roi.contains(currKeyPoint.pt))
+        {
+            int prevKptIndex = (*it).queryIdx;
+            const auto & prevKeyPoint = kptsPrev[prevKptIndex];
+            if(cv::norm(currKeyPoint.pt - prevKeyPoint.pt) < distanceMapMean * 1.3)
+            {
+                boundingBox.keypoints.push_back(currKeyPoint);
+                boundingBox.kptMatches.push_back(*it);
+            }
+        }
+    }
 }
-
 
 // Compute time-to-collision (TTC) based on keypoint correspondences in successive images
 void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr,

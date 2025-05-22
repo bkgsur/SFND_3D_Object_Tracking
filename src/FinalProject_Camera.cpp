@@ -22,33 +22,33 @@
 
 using namespace std;
 
-/* MAIN PROGRAM */
-int main(int argc, const char *argv[])
+/* INIT VARIABLES AND DATA STRUCTURES */
+// data location
+string dataPath = "../";
+
+// camera
+string imgBasePath = dataPath + "images/";
+string imgPrefix = "KITTI/2011_09_26/image_02/data/000000"; // left camera, color
+string imgFileType = ".png";
+int imgStartIndex = 0; // first file index to load (assumes Lidar and camera names have identical naming convention)
+int imgEndIndex = 18;   // last file index to load
+int imgStepWidth = 1; 
+int imgFillWidth = 4;  // no. of digits which make up the file index (e.g. img-0001.png)
+
+// object detection
+string yoloBasePath = dataPath + "dat/yolo/";
+string yoloClassesFile = yoloBasePath + "coco.names";
+string yoloModelConfiguration = yoloBasePath + "yolov3.cfg";
+string yoloModelWeights = yoloBasePath + "yolov3.weights";
+
+// Lidar
+string lidarPrefix = "KITTI/2011_09_26/velodyne_points/data/000000";
+string lidarFileType = ".bin";
+
+
+void project_run(string detectorType,string descriptorType)
 {
-    /* INIT VARIABLES AND DATA STRUCTURES */
-
-    // data location
-    string dataPath = "../";
-
-    // camera
-    string imgBasePath = dataPath + "images/";
-    string imgPrefix = "KITTI/2011_09_26/image_02/data/000000"; // left camera, color
-    string imgFileType = ".png";
-    int imgStartIndex = 0; // first file index to load (assumes Lidar and camera names have identical naming convention)
-    int imgEndIndex = 18;   // last file index to load
-    int imgStepWidth = 1; 
-    int imgFillWidth = 4;  // no. of digits which make up the file index (e.g. img-0001.png)
-
-    // object detection
-    string yoloBasePath = dataPath + "dat/yolo/";
-    string yoloClassesFile = yoloBasePath + "coco.names";
-    string yoloModelConfiguration = yoloBasePath + "yolov3.cfg";
-    string yoloModelWeights = yoloBasePath + "yolov3.weights";
-
-    // Lidar
-    string lidarPrefix = "KITTI/2011_09_26/velodyne_points/data/000000";
-    string lidarFileType = ".bin";
-
+ 
     // calibration data for camera and lidar
     cv::Mat P_rect_00(3,4,cv::DataType<double>::type); // 3x4 projection matrix after rectification
     cv::Mat R_rect_00(4,4,cv::DataType<double>::type); // 3x3 rectifying rotation to make image planes co-planar
@@ -129,12 +129,12 @@ int main(int argc, const char *argv[])
         clusterLidarWithROI((dataBuffer.end()-1)->boundingBoxes, (dataBuffer.end() - 1)->lidarPoints, shrinkFactor, P_rect_00, R_rect_00, RT);
 
         // Visualize 3D objects
-        bVis = true;
+       
         if(bVis)
         {
             show3DObjects((dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(2000, 2000), true);
         }
-        bVis = false;
+       
 
         cout << "#4 : CLUSTER LIDAR POINT CLOUD done" << endl;
         
@@ -150,15 +150,19 @@ int main(int argc, const char *argv[])
 
         // extract 2D keypoints from current image
         vector<cv::KeyPoint> keypoints; // create empty feature list for current image
-        string detectorType = "SHITOMASI";
+        
 
         if (detectorType.compare("SHITOMASI") == 0)
         {
             detKeypointsShiTomasi(keypoints, imgGray, false);
         }
+        else if (detectorType.compare("HARRIS") == 0)
+        {
+            detKeypointsHarris(keypoints, frame.cameraImg, bVis);
+        }
         else
         {
-            //...
+            detKeypointsModern(keypoints, frame.cameraImg, detectorType, bVis);
         }
 
         // optional : limit number of keypoints (helpful for debugging and learning)
@@ -184,7 +188,7 @@ int main(int argc, const char *argv[])
         /* EXTRACT KEYPOINT DESCRIPTORS */
 
         cv::Mat descriptors;
-        string descriptorType = "BRISK"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
+      
         descKeypoints((dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->cameraImg, descriptors, descriptorType);
 
         // push descriptors for current frame to end of data buffer
@@ -200,12 +204,19 @@ int main(int argc, const char *argv[])
 
             vector<cv::DMatch> matches;
             string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
-            string descriptorType = "DES_BINARY"; // DES_BINARY, DES_HOG
+            string descriptor = "DES_BINARY"; // DES_BINARY, DES_HOG
             string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN
+
+
+                if(descriptorType=="SIFT")
+                {
+                    matcherType = "MAT_FLANN";           
+                    selectorType = "SEL_KNN";      
+                }
 
             matchDescriptors((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints,
                              (dataBuffer.end() - 2)->descriptors, (dataBuffer.end() - 1)->descriptors,
-                             matches, descriptorType, matcherType, selectorType);
+                             matches, descriptor, matcherType, selectorType);
 
             // store matches in current data frame
             (dataBuffer.end() - 1)->kptMatches = matches;
@@ -267,7 +278,7 @@ int main(int argc, const char *argv[])
                     computeTTCCamera((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, currBB->kptMatches, sensorFrameRate, ttcCamera);
                     //// EOF STUDENT ASSIGNMENT
 
-                    bVis = true;
+                    
                     if (bVis)
                     {
                         cv::Mat visImg = (dataBuffer.end() - 1)->cameraImg.clone();
@@ -284,7 +295,7 @@ int main(int argc, const char *argv[])
                         cout << "Press key to continue to next frame" << endl;
                         cv::waitKey(0);
                     }
-                    bVis = false;
+                  
 
                 } // eof TTC computation
             } // eof loop over all BB matches            
@@ -293,5 +304,67 @@ int main(int argc, const char *argv[])
 
     } // eof loop over all images
 
+     
+}
+/* MAIN PROGRAM */
+int main(int argc, const char *argv[])
+{
+    string detectorTypeArray[7] = {"SHITOMASI", "HARRIS", "FAST", "BRISK", "ORB", "AKAZE","SIFT"}; 
+    string descriptorTypeArray[6] = {"BRISK", "BRIEF", "ORB", "FREAK","AKAZE","SIFT" };   
+    string keypointCountMsg;
+    string matchedKeypointCountMsg;
+    string executionTimeMsg;
+
+    string keypointCountMsgFinal;
+    string matchedKeypointCountMsgFinal;
+    string executionTimeMsgFinal; 
+
+    for (std::string detectorType : detectorTypeArray) 
+    {        
+        std::cout << "Detector Type: " << detectorType << std::endl;      
+        
+        matchedKeypointCountMsg = "|"+ detectorType;
+        executionTimeMsg = "|"+detectorType;
+        for (std::string descriptorType : descriptorTypeArray) 
+        {          
+            auto start = std::chrono::high_resolution_clock::now();      
+            try
+            {                
+                    
+                if(detectorType != "AKAZE" && descriptorType == "AKAZE")
+                {
+                    //std::cout << "Skipping - Detector/Descriptor: " << detectorType <<"/"<< descriptorType << std::endl;    
+                    matchedKeypointCountMsg += "|N/A ";                 
+                }
+                else if(detectorType == "SIFT" && descriptorType == "ORB")
+                {
+                    //std::cout << "Skipping - SIFT/ORB" << std::endl;  
+                    matchedKeypointCountMsg += "|N/A ";                     
+                }                
+                else
+                {  
+                    project_run(detectorType,descriptorType);
+                }
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << e.what() << '\n';
+            }
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            executionTimeMsg +=  "|" + (duration.count()==0? "N/A": std::to_string(duration.count())) + " ";
+        }
+    }
+    keypointCountMsgFinal = "| Detector | image0 | image1 | image2 | image3 | image4 | image5 | image6 | image7 | image8 | image9 | Neighborhood size |\n| :---:    | :---:  | :---:  | :---:  |  :---: | :---:  | :---:  | :---:  | :---:  | :---:  | :---:  | :---: | \n" + keypointCountMsgFinal;
+    std::cout <<  keypointCountMsgFinal << std::endl;
+    std::cout << "--------------------------------------------------------" << std::endl;
+    
+    matchedKeypointCountMsgFinal = "| Detector,Descriptor | BRISK | BRIEF | ORB | FREAK | AKAZE | SIFT |\n| --- | --- | --- |--- |--- |--- |--- | \n" + matchedKeypointCountMsgFinal;
+    std::cout <<  matchedKeypointCountMsgFinal << std::endl;
+    std::cout << "--------------------------------------------------------" << std::endl;
+
+    executionTimeMsgFinal = "| Detector,Descriptor | BRISK | BRIEF | ORB | FREAK | AKAZE | SIFT |\n| --- | --- | --- |--- |--- |--- |--- | \n" + executionTimeMsgFinal;
+    std::cout <<  executionTimeMsgFinal << std::endl;
+    std::cout << "--------------------------------------------------------" << std::endl;
     return 0;
 }
