@@ -123,7 +123,7 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 }
 
 
-// associate a given bounding box with the keypoints it contains
+//  bounding box association with   keypoints 
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev,
                               std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches) {
 
@@ -264,116 +264,80 @@ void computeTTCCameraCAM(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::Ke
     }
     }
 
-
+// TTC based on  median value
 void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
                      std::vector<LidarPoint> &lidarPointsCurr, double frameRate, double &TTC) {
-    double dT = 1 / frameRate;
+    
     double laneWidth = 4.0;
-    vector<double> lidarPointsCurrX, lidarPointsPrevX;
+    vector<double> lidarPointsCurrent_Forwad, lidarPointsPrevious_Forwad;
     for (auto it = lidarPointsPrev.begin(); it != lidarPointsPrev.end(); ++it) {
         if (abs(it->y) <= laneWidth / 2.0) {
-            lidarPointsPrevX.push_back(it->x);
+            lidarPointsPrevious_Forwad.push_back(it->x);
         }
     }
     for (auto it = lidarPointsCurr.begin(); it != lidarPointsCurr.end(); ++it) {
 
         if (abs(it->y) <= laneWidth / 2.0) {
-            lidarPointsCurrX.push_back(it->x);
+            lidarPointsCurrent_Forwad.push_back(it->x);
         }
-    }
-    bool is_median = false;
-    if (is_median) {
-        // calculate median value
-        sort(lidarPointsCurrX.begin(), lidarPointsCurrX.end());
-        sort(lidarPointsPrevX.begin(), lidarPointsPrevX.end());
-        int lidarPtCurrSize = lidarPointsCurrX.size();
-        int lidarPtPrevSize = lidarPointsPrevX.size();
+    } 
+    
+    sort(lidarPointsCurrent_Forwad.begin(), lidarPointsCurrent_Forwad.end());
+    sort(lidarPointsPrevious_Forwad.begin(), lidarPointsPrevious_Forwad.end());
+    int lidarPointsCurrent_Forwad_Size = lidarPointsCurrent_Forwad.size();
+    int lidarPointsPrevious_Forwad_Size = lidarPointsPrevious_Forwad.size();
 
-        double d1 = lidarPtCurrSize % 2 == 0 ?
-                    (lidarPointsCurrX[lidarPtCurrSize / 2 - 1] + lidarPointsCurrX[lidarPtCurrSize / 2]) / 2
-                                             : lidarPointsCurrX[lidarPtCurrSize / 2];
-        double d0 = lidarPtPrevSize % 2 == 0 ?
-                    (lidarPointsPrevX[lidarPtPrevSize / 2 - 1] + lidarPointsPrevX[lidarPtPrevSize / 2]) / 2
-                                             : lidarPointsPrevX[lidarPtPrevSize / 2];
-        TTC = d1 * dT / (d0 - d1);
-    } else {
-        // 6 sigma principle
-        double XCurrSum = accumulate(lidarPointsCurrX.begin(), lidarPointsCurrX.end(), 0.0);
-        double XPrevSum = accumulate(lidarPointsPrevX.begin(), lidarPointsPrevX.end(), 0.0);
-        double CurrMean = XCurrSum / lidarPointsCurrX.size();
-        double PrevMean = XPrevSum / lidarPointsPrevX.size();
-        double Curraccum = 0.0;
-        double Prevaccum = 0.0;
-        for_each(begin(lidarPointsCurrX), std::end(lidarPointsCurrX), [&](const double d) {
-            Curraccum += (d - XCurrSum) * (d - XCurrSum);
-        });
-
-        double CurrStd = sqrt(Curraccum / (lidarPointsCurrX.size() - 1));
-
-        for_each(begin(lidarPointsPrevX), std::end(lidarPointsPrevX), [&](const double d) {
-            Prevaccum += (d - XPrevSum) * (d - XPrevSum);
-        });
-
-        double PrevStd = sqrt(Prevaccum / (lidarPointsPrevX.size() - 1));
-        int CurrCount = 0;
-        int PrevCount = 0;
-        double CurrAns = 0;
-        double PrevAns = 0;
-        for (int i = 0; i < lidarPointsCurrX.size(); ++i) {
-            if (abs(lidarPointsCurrX[i] - CurrMean) < 3 * CurrStd) {
-                CurrAns += lidarPointsCurrX[i];
-                ++CurrCount;
-            }
-        }
-
-        for (int i = 0; i < lidarPointsPrevX.size(); ++i) {
-            if (abs(lidarPointsPrevX[i] - PrevMean) < 3 * PrevStd) {
-                PrevAns += lidarPointsPrevX[i];
-                ++PrevCount;
-            }
-        }
-
-        double d1 = CurrAns / CurrCount;
-        double d0 = PrevAns / PrevCount;
-        TTC = d1 * dT / (d0 - d1);
-    }
+    double d1 = lidarPointsCurrent_Forwad_Size % 2 == 0 ? (lidarPointsCurrent_Forwad[(lidarPointsCurrent_Forwad_Size / 2) - 1] + lidarPointsCurrent_Forwad[lidarPointsCurrent_Forwad_Size / 2]) / 2
+                                            : lidarPointsCurrent_Forwad[lidarPointsCurrent_Forwad_Size / 2];
+    double d0 = lidarPointsPrevious_Forwad_Size % 2 == 0 ?
+                (lidarPointsPrevious_Forwad[(lidarPointsPrevious_Forwad_Size / 2) - 1] + lidarPointsPrevious_Forwad[lidarPointsPrevious_Forwad_Size / 2]) / 2
+                                            : lidarPointsPrevious_Forwad[lidarPointsPrevious_Forwad_Size / 2];
+    TTC = d1 * (1 / frameRate) / (d0 - d1);    
 
 }
 
 
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches, std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
                         DataFrame &currFrame) {
-    multimap<int, int> boxmap{};
+    multimap<int, int> mapIds{};
     for (auto match:matches) {
-        cv::KeyPoint prevPoints = prevFrame.keypoints[match.queryIdx];
-        cv::KeyPoint currPoints = currFrame.keypoints[match.trainIdx];
-        int prevBoxId = -1;
-        int currBoxId = -1;
+        cv::KeyPoint prev_Point = prevFrame.keypoints[match.queryIdx];
+        cv::KeyPoint curr_Point = currFrame.keypoints[match.trainIdx];
+        int prev_BoxId = -1;
+        int curr_BoxId = -1;
 
         for (auto box:prevFrame.boundingBoxes) {
-            if (box.roi.contains(prevPoints.pt)) prevBoxId = box.boxID;
+            if (box.roi.contains(prev_Point.pt)) 
+            {
+                prev_BoxId = box.boxID;
+            }
         }
         for (auto box:currFrame.boundingBoxes) {
-            if (box.roi.contains(currPoints.pt)) currBoxId = box.boxID;
+            if (box.roi.contains(curr_Point.pt)) 
+            {
+                curr_BoxId = box.boxID;
+            }
         }
-        // generate currBoxId-prevBoxId map pair
-        boxmap.insert({currBoxId, prevBoxId});
+        // save  current BoxId,previous BoxId pair
+        mapIds.insert({curr_BoxId, prev_BoxId});
 
     }
-    int CurrBoxSize = currFrame.boundingBoxes.size();
-    int prevBoxSize = prevFrame.boundingBoxes.size();
-    // find the best matched previous boundingbox for each current boudingbox
-    for (int i = 0; i < CurrBoxSize; ++i) {
-        auto boxmapPair = boxmap.equal_range(i);
-        vector<int> currBoxCount(prevBoxSize, 0);
-        for (auto pr = boxmapPair.first; pr != boxmapPair.second; ++pr) {
-            if (-1 != (*pr).second) currBoxCount[(*pr).second] += 1;
+    int curr_BoxSize = currFrame.boundingBoxes.size();
+    int prev_BoxSize = prevFrame.boundingBoxes.size();
+    //best match previous boundingbox per current boundingbox
+    for (int i = 0; i < curr_BoxSize; ++i) {
+        auto mapPair = mapIds.equal_range(i);
+        vector<int> curr_BoxCount(prev_BoxSize, 0);
+        for (auto pr = mapPair.first; pr != mapPair.second; ++pr) {
+            if ((-1 != (*pr).second))
+            { 
+                curr_BoxCount[(*pr).second] += 1;
+            }
         }
         // find the position of best prev box which has highest number of keypoint correspondences.
-        int maxPosition = std::distance(currBoxCount.begin(),
-                                        std::max_element(currBoxCount.begin(), currBoxCount.end()));
-        bbBestMatches.insert({maxPosition, i});
-        cout<<"Current BoxID: "<<i<<" match Previous BoxID: "<<maxPosition<<endl;
+        bbBestMatches.insert({std::distance(curr_BoxCount.begin(),
+                                        std::max_element(curr_BoxCount.begin(), curr_BoxCount.end())), i});
+       
     }
 
 }

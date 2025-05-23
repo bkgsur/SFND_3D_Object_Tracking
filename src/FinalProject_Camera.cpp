@@ -46,9 +46,12 @@ string lidarPrefix = "KITTI/2011_09_26/velodyne_points/data/000000";
 string lidarFileType = ".bin";
 
 
-void project_run(string detectorType,string descriptorType)
+void project_run(string detectorType,string descriptorType, double& ttcLidarAvg,  double& ttcCameraAvg)
 {
- 
+    double ttcLidarFinal = 0.0; 
+    double ttcCameraFinal = 0.0;
+    int count=0;
+   
     // calibration data for camera and lidar
     cv::Mat P_rect_00(3,4,cv::DataType<double>::type); // 3x4 projection matrix after rectification
     cv::Mat R_rect_00(4,4,cv::DataType<double>::type); // 3x3 rectifying rotation to make image planes co-planar
@@ -79,6 +82,7 @@ void project_run(string detectorType,string descriptorType)
     for (size_t imgIndex = 0; imgIndex <= imgEndIndex - imgStartIndex; imgIndex+=imgStepWidth)
     {
         /* LOAD IMAGE INTO BUFFER */
+        //cout << "#00 : Image Index: " + std::to_string(imgIndex) << endl;
 
         // assemble filenames for current index
         ostringstream imgNumber;
@@ -93,7 +97,7 @@ void project_run(string detectorType,string descriptorType)
         frame.cameraImg = img;
         dataBuffer.push_back(frame);
 
-        cout << "#1 : LOAD IMAGE INTO BUFFER done" << endl;
+        //cout << "#1 : LOAD IMAGE INTO BUFFER done" << endl;
 
 
         /* DETECT & CLASSIFY OBJECTS */
@@ -103,7 +107,7 @@ void project_run(string detectorType,string descriptorType)
         detectObjects((dataBuffer.end() - 1)->cameraImg, (dataBuffer.end() - 1)->boundingBoxes, confThreshold, nmsThreshold,
                       yoloBasePath, yoloClassesFile, yoloModelConfiguration, yoloModelWeights, bVis);
 
-        cout << "#2 : DETECT & CLASSIFY OBJECTS done" << endl;
+        //cout << "#2 : DETECT & CLASSIFY OBJECTS done" << endl;
 
 
         /* CROP LIDAR POINTS */
@@ -119,7 +123,7 @@ void project_run(string detectorType,string descriptorType)
     
         (dataBuffer.end() - 1)->lidarPoints = lidarPoints;
 
-        cout << "#3 : CROP LIDAR POINTS done" << endl;
+        //cout << "#3 : CROP LIDAR POINTS done" << endl;
 
 
         /* CLUSTER LIDAR POINT CLOUD */
@@ -136,7 +140,7 @@ void project_run(string detectorType,string descriptorType)
         }
        
 
-        cout << "#4 : CLUSTER LIDAR POINT CLOUD done" << endl;
+        //cout << "#4 : CLUSTER LIDAR POINT CLOUD done" << endl;
         
         
         // REMOVE THIS LINE BEFORE PROCEEDING WITH THE FINAL PROJECT
@@ -176,13 +180,13 @@ void project_run(string detectorType,string descriptorType)
                 keypoints.erase(keypoints.begin() + maxKeypoints, keypoints.end());
             }
             cv::KeyPointsFilter::retainBest(keypoints, maxKeypoints);
-            cout << " NOTE: Keypoints have been limited!" << endl;
+            //cout << " NOTE: Keypoints have been limited!" << endl;
         }
 
         // push keypoints and descriptor for current frame to end of data buffer
         (dataBuffer.end() - 1)->keypoints = keypoints;
 
-        cout << "#5 : DETECT KEYPOINTS done" << endl;
+        //cout << "#5 : DETECT KEYPOINTS done" << endl;
 
 
         /* EXTRACT KEYPOINT DESCRIPTORS */
@@ -194,7 +198,7 @@ void project_run(string detectorType,string descriptorType)
         // push descriptors for current frame to end of data buffer
         (dataBuffer.end() - 1)->descriptors = descriptors;
 
-        cout << "#6 : EXTRACT DESCRIPTORS done" << endl;
+        //cout << "#6 : EXTRACT DESCRIPTORS done" << endl;
 
 
         if (dataBuffer.size() > 1) // wait until at least two images have been processed
@@ -221,7 +225,7 @@ void project_run(string detectorType,string descriptorType)
             // store matches in current data frame
             (dataBuffer.end() - 1)->kptMatches = matches;
 
-            cout << "#7 : MATCH KEYPOINT DESCRIPTORS done" << endl;
+            //cout << "#7 : MATCH KEYPOINT DESCRIPTORS done" << endl;
 
             
             /* TRACK 3D OBJECT BOUNDING BOXES */
@@ -235,7 +239,7 @@ void project_run(string detectorType,string descriptorType)
             // store matches in current data frame
             (dataBuffer.end()-1)->bbMatches = bbBestMatches;
 
-            cout << "#8 : TRACK 3D OBJECT BOUNDING BOXES done" << endl;
+            //cout << "#8 : TRACK 3D OBJECT BOUNDING BOXES done" << endl;
 
 
             /* COMPUTE TTC ON OBJECT IN FRONT */
@@ -266,18 +270,23 @@ void project_run(string detectorType,string descriptorType)
                 {
                     //// STUDENT ASSIGNMENT
                     //// TASK FP.2 -> compute time-to-collision based on Lidar data (implement -> computeTTCLidar)
-                    double ttcLidar; 
+                    double ttcLidar = 0.0; 
+                    double ttcCamera = 0.0;
                     computeTTCLidar(prevBB->lidarPoints, currBB->lidarPoints, sensorFrameRate, ttcLidar);
+                    //cout << "ttcLidar: "+ std::to_string(ttcLidar) << endl;
+                    ttcLidarFinal +=ttcLidar;
                     //// EOF STUDENT ASSIGNMENT
 
                     //// STUDENT ASSIGNMENT
                     //// TASK FP.3 -> assign enclosed keypoint matches to bounding box (implement -> clusterKptMatchesWithROI)
                     //// TASK FP.4 -> compute time-to-collision based on camera (implement -> computeTTCCamera)
-                    double ttcCamera;
+                    
                     clusterKptMatchesWithROI(*currBB, (dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->kptMatches);                    
                     computeTTCCamera((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, currBB->kptMatches, sensorFrameRate, ttcCamera);
+                    //cout << "ttcCamera: "+ std::to_string(ttcCamera) << endl;
+                    ttcCameraFinal +=ttcCamera;
                     //// EOF STUDENT ASSIGNMENT
-
+                    count+=1;
                     
                     if (bVis)
                     {
@@ -304,67 +313,50 @@ void project_run(string detectorType,string descriptorType)
 
     } // eof loop over all images
 
-     
+     ttcLidarAvg = ttcLidarFinal/count;
+     ttcCameraAvg = ttcCameraFinal/count;
 }
 /* MAIN PROGRAM */
 int main(int argc, const char *argv[])
 {
     string detectorTypeArray[7] = {"SHITOMASI", "HARRIS", "FAST", "BRISK", "ORB", "AKAZE","SIFT"}; 
     string descriptorTypeArray[6] = {"BRISK", "BRIEF", "ORB", "FREAK","AKAZE","SIFT" };   
-    string keypointCountMsg;
-    string matchedKeypointCountMsg;
-    string executionTimeMsg;
-
-    string keypointCountMsgFinal;
-    string matchedKeypointCountMsgFinal;
-    string executionTimeMsgFinal; 
+ 
+    double ttcLidarAvg =0.0;
+    double ttcCameraAvg =0.0; 
+    
 
     for (std::string detectorType : detectorTypeArray) 
-    {        
-        std::cout << "Detector Type: " << detectorType << std::endl;      
-        
-        matchedKeypointCountMsg = "|"+ detectorType;
-        executionTimeMsg = "|"+detectorType;
+    {           
         for (std::string descriptorType : descriptorTypeArray) 
-        {          
-            auto start = std::chrono::high_resolution_clock::now();      
+        {    
+           
             try
             {                
-                    
+                ttcLidarAvg =0.0;
+                ttcCameraAvg =0.0;        
                 if(detectorType != "AKAZE" && descriptorType == "AKAZE")
                 {
                     //std::cout << "Skipping - Detector/Descriptor: " << detectorType <<"/"<< descriptorType << std::endl;    
-                    matchedKeypointCountMsg += "|N/A ";                 
+                                    
                 }
                 else if(detectorType == "SIFT" && descriptorType == "ORB")
                 {
-                    //std::cout << "Skipping - SIFT/ORB" << std::endl;  
-                    matchedKeypointCountMsg += "|N/A ";                     
+                    //std::cout << "Skipping - SIFT/ORB" << std::endl;                                 
                 }                
                 else
                 {  
-                    project_run(detectorType,descriptorType);
+                    project_run(detectorType,descriptorType,ttcLidarAvg,ttcCameraAvg);                    
+                    std::cout <<  detectorType + " " + descriptorType + " " + std::to_string(ttcLidarAvg) + " " + std::to_string(ttcCameraAvg) + " " + std::to_string(abs(ttcLidarAvg - ttcCameraAvg)) << std::endl; 
+                    std::cout << "--------------------------------------------------------" << std::endl;     
                 }
             }
             catch(const std::exception& e)
             {
                 std::cerr << e.what() << '\n';
-            }
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-            executionTimeMsg +=  "|" + (duration.count()==0? "N/A": std::to_string(duration.count())) + " ";
-        }
+            }            
+        }      
     }
-    keypointCountMsgFinal = "| Detector | image0 | image1 | image2 | image3 | image4 | image5 | image6 | image7 | image8 | image9 | Neighborhood size |\n| :---:    | :---:  | :---:  | :---:  |  :---: | :---:  | :---:  | :---:  | :---:  | :---:  | :---:  | :---: | \n" + keypointCountMsgFinal;
-    std::cout <<  keypointCountMsgFinal << std::endl;
-    std::cout << "--------------------------------------------------------" << std::endl;
     
-    matchedKeypointCountMsgFinal = "| Detector,Descriptor | BRISK | BRIEF | ORB | FREAK | AKAZE | SIFT |\n| --- | --- | --- |--- |--- |--- |--- | \n" + matchedKeypointCountMsgFinal;
-    std::cout <<  matchedKeypointCountMsgFinal << std::endl;
-    std::cout << "--------------------------------------------------------" << std::endl;
-
-    executionTimeMsgFinal = "| Detector,Descriptor | BRISK | BRIEF | ORB | FREAK | AKAZE | SIFT |\n| --- | --- | --- |--- |--- |--- |--- | \n" + executionTimeMsgFinal;
-    std::cout <<  executionTimeMsgFinal << std::endl;
-    std::cout << "--------------------------------------------------------" << std::endl;
     return 0;
 }
